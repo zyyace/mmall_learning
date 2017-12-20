@@ -1,0 +1,213 @@
+var HttpUtils = require("HttpUtils");
+var WebSocketUtils = require("WebSocketUtils");
+var ProtobufBuilder = require("ProtobufBuilder");
+var CMD = require("CMD");
+var RC = require("RC");
+var StringUtils = require("StringUtils");
+var DataUtils = require("DataUtils");
+var GamePlayConfigurationUtils = require("GamePlayConfigurationUtils");
+var UserManager = require("UserManager");
+var AnySDKUtils = require("AnySDKUtils");
+var GameRuleUtils = require("GameRuleUtils");
+const Analysis = require("Analysis");
+const Urls = require("Urls");
+const Constant = require("Constant");
+var _this;
+
+cc.Class({
+    extends: cc.Component,
+
+    properties: {
+        gameRuleList: {
+            type: cc.Node,
+            default: null
+        },
+        roomOwnerContent: {
+            type: cc.Node,
+            default: null
+        },
+        gameNumerContent: {
+            type: cc.Node,
+            default: null
+        },
+        someTypeContent: {
+            type: cc.Node,
+            default: null
+        },
+        playWayContent: {
+            type: cc.Node,
+            default: null
+        },
+        hiraginoSansGBW3Font: {
+            type: cc.Font,
+            default: null
+        }
+    },
+
+    // use this for initialization
+    onLoad: function() {
+        _this = this;
+        this.roomOwner = "";
+        this.gameNumer = "";
+        this.someTypeArray = [];
+        this.playWayArray = [];
+
+        _this.showDetailRule();
+
+        if (DataUtils.getInstance().get('isInRoom')) {
+            this.node.active = false;
+        } else {
+            _this.showGameRuleNode();
+        }
+    },
+
+    showDetailRule: function() {
+        let gameRuleDetail = DataUtils.getInstance().get("Gameplays");
+        let evt = DataUtils.getInstance().get("TotalGamePlayConfiguration");
+        let gamePlayArray;
+        let code;
+        let itemCode;
+        let itemCodeKey;
+        _this.totalGamePlay = GameRuleUtils.getInstance().keyValueObject(evt);
+        _this.keyArray = [];
+        for (let i = 0; i < gameRuleDetail.length; i++) {
+            gamePlayArray = gameRuleDetail[i];
+            code = "" + gamePlayArray.code;
+            _this.keyArray.push(code);
+            for (let j = 0; j < gamePlayArray.itemCodes.length; j++) {
+                itemCode = gamePlayArray.itemCodes[j];
+                itemCodeKey = "" + code + "_" + itemCode;
+                _this.keyArray.push(itemCodeKey);
+            }
+        }
+    },
+
+    showGameRuleNode: function() {
+        this.node.active = true;
+        var ownerId = DataUtils.getInstance().get("ownerId");
+        _this.roomOwner = UserManager.getInstance().getByUserId(ownerId).nickname;
+        // 解析数据
+        this.interPretingData();
+        DataUtils.getInstance().set("gameNumber", this.gameNumer);
+        _this.resizeHeightContentResult(_this.roomOwner,
+            _this.gameNumer,
+            _this.someTypeArray,
+            _this.playWayArray);
+    },
+    /**
+     * 如果房主不需要显示规则
+     */
+    /*showGameRule: function () {
+        var userId = DataUtils.getInstance().get("LoginResp").userId;
+        var ownerId = DataUtils.getInstance().get("ownerId");
+        if (ownerId === userId) {
+            _this.node.active = false;
+        }
+    },*/
+
+    resizeHeightContentResult: function(roomOwner = this.roomOwner,
+        gameNumer = this.gameNumer,
+        someTypeArray = this.someTypeArray,
+        playWayArray = this.playWayArray) {
+
+        this.someTypeContent.height = this.resizeHeight(someTypeArray, this.someTypeContent, 2);
+        this.playWayContent.height = this.resizeHeight(playWayArray, this.playWayContent, 4);
+
+        this.someTypeContent.parent.height = this.someTypeContent.height;
+        this.playWayContent.parent.height = this.playWayContent.height;
+        this.gameRuleList.parent.height = this.someTypeContent.parent.height + this.playWayContent.parent.height + 150;
+        this.roomOwnerContent.getComponent(cc.RichText).string = roomOwner;
+        this.gameNumerContent.getComponent(cc.RichText).string = gameNumer;
+    },
+
+    resizeHeight: function(array, nodeParent, wrapNumber) {
+        var flag;
+        var childrenWidths = 0;
+        for (var i = 0; i < array.length; i++) {
+            if (i === array.length - 1) {
+                flag = 1;
+            }
+            var newNode = this.addNewNode(array[i], flag);
+            childrenWidths += newNode.width;
+            nodeParent.addChild(newNode);
+        }
+
+        if (array.length > wrapNumber) {
+            var h = Math.ceil(array.length / wrapNumber);
+            var w = Math.ceil(childrenWidths / 400);
+            if (w == 1) {
+                return 50;
+            }
+            return h * 40;
+        } else {
+            return 50;
+        }
+    },
+
+    addNewNode: function(content, flag) {
+        var newNode = new cc.Node();
+        newNode.color = new cc.Color(243, 239, 210);
+
+        newNode.addComponent(cc.RichText);
+        newNode.getComponent(cc.RichText).fontSize = 24;
+        // newNode.getComponent(cc.RichText).font = _this.hiraginoSansGBW3Font;
+        newNode.getComponent(cc.RichText).lineHeight = 40;
+        if (flag) {
+            newNode.getComponent(cc.RichText).string = content;
+        } else {
+            newNode.getComponent(cc.RichText).string = content + "、";
+        }
+        return newNode;
+    },
+
+    onBtnKnowClick: function() {
+        // analysis
+        AnySDKUtils.logEvent(Analysis.Events.GAME_RULE_KNOW, "game rule know");
+
+        this.node.removeFromParent(true);
+        this.node.destroy();
+    },
+
+    onStartGameClick: function() {
+        WebSocketUtils.getInstance().send(ProtobufBuilder.getInstance().buildPrepareGameC2S(CMD.CMD_PREPARE_GAME_REQ, 1));
+        DataUtils.getInstance().set('isPrepare', true);
+
+        // analysis
+        AnySDKUtils.logEvent(Analysis.Events.GAME_RULE_PREPARE, "game rule prepare");
+
+        this.node.removeFromParent(true);
+        this.node.destroy();
+    },
+
+    interPretingData: function() {
+        let code;
+        for (let i = 0; i < _this.keyArray.length; i++) {
+            code = _this.keyArray[i];
+            // 买马方式不显示
+            if (code == "1002") {
+                continue;
+            }
+            if (code.indexOf("1001_") !== -1) {
+                _this.gameNumer = _this.totalGamePlay[code];
+            } else if (code.indexOf("1004_") !== -1) {
+                _this.someTypeArray.push(_this.totalGamePlay[code]);
+            } else if (code.indexOf("_") !== -1) {
+                _this.playWayArray.push(_this.totalGamePlay[code]);
+            } else {
+
+            }
+        }
+    },
+
+    compare: function(obj1, obj2) {
+        var val1 = obj1.code;
+        var val2 = obj2.code;
+        if (val1 < val2) {
+            return -1;
+        } else if (val1 > val2) {
+            return 1;
+        } else {
+            return 0;
+        }
+    }
+});
